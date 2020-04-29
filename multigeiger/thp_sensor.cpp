@@ -14,11 +14,11 @@ Adafruit_BME280 bme;
 
 bool setup_thp_sensor(void) {
   have_thp = (bool) bme.begin(BME280_ADDRESS);
+//  if (!have_thp)
+//    have_thp = (bool) bme.begin(BME280_ADDRESS_ALTERNATE);
   if (!have_thp)
-    have_thp = (bool) bme.begin(BME280_ADDRESS_ALTERNATE);
-  if (have_thp)
-    log(INFO, "BME_Status: %d  ID:%0X", (int) have_thp, bme.sensorID());
-  else
+//    log(INFO, "BME_Status: %d  ID:%0X", (int) have_thp, bme.sensorID());
+//  else
     log(INFO, "BME_Status: %d  ID:None", (int) have_thp);
   return have_thp;
 }
