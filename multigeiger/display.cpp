@@ -28,7 +28,7 @@ void display_start_screen(void) {
   pu8x8->clear();
   if (isLoraBoard) {
     // Display is only 4 lines by 8 characters; lines counting from 2 to 5
-    pu8x8->setFont(u8x8_font_5x8_f);        // use really small font
+    pu8x8->setFont(u8x8_font_amstrad_cpc_extended_f);        // u8x8 can handle only 8x8, smaller font has no advantage
     for (int i = 2; i < 6; i++) {
       pu8x8->drawString(0, i, "        ");  // clear all 4 lines
     }
@@ -41,7 +41,7 @@ void display_start_screen(void) {
     snprintf(line, 9, "%s", VERSION_STR);  // 8 chars + \0 termination
     pu8x8->drawString(0, 5, line);
   } else {
-    pu8x8->setFont(u8x8_font_7x14_1x2_f);
+    pu8x8->setFont(u8x8_font_amstrad_cpc_extended_f);
     pu8x8->drawString(0, 0, "Geiger-Counter");
     pu8x8->drawString(0, 2, "==============");
     snprintf(line, 15, "%s", VERSION_STR);  // 14 chars + \0 termination
@@ -65,32 +65,87 @@ void setup_display(bool loraHardware) {
 }
 
 void clearDisplayLine(int line) {
-  char blank[17] = "                ";
-  if (isLoraBoard) {
-    blank[9] = '\0';
-  }
-  pu8x8->drawString(0, line, blank);
+  const char *blanks;
+  blanks = isLoraBoard ? "        " : "                "; // 8 / 16
+  pu8x8->drawString(0, line, blanks);
 }
 
 void displayStatusLine(String txt) {
+  if (txt.length() == 0)
+    return;
   int line = isLoraBoard ? 5 : 7;
-  pu8x8->setFont(u8x8_font_5x8_f);
+  pu8x8->setFont(u8x8_font_amstrad_cpc_extended_f);
   clearDisplayLine(line);
   pu8x8->drawString(0, line, txt.c_str());
 }
 
-char *nullFill(int n, int digits) {
-  static char erg[9];  // max. 8 digits possible!
-  if (digits > 8) {
-    digits = 8;
-  }
-  char format[5];
-  sprintf(format, "%%%dd", digits);
-  sprintf(erg, format, n);
-  return erg;
+static int status[STATUS_MAX] = {ST_NODISPLAY, ST_NODISPLAY, ST_NODISPLAY, ST_NODISPLAY,
+                                 ST_NODISPLAY, ST_NODISPLAY, ST_NODISPLAY, ST_NODISPLAY
+                                };  // current status of misc. subsystems
+
+static const char *status_chars[STATUS_MAX] = {
+  // group WiFi and transmission to internet servers
+  ".W0wA",  // ST_WIFI_OFF, ST_WIFI_CONNECTED, ST_WIFI_ERROR, ST_WIFI_CONNECTING, ST_WIFI_AP
+  ".s1S?",  // ST_SCOMM_OFF, ST_SCOMM_IDLE, ST_SCOMM_ERROR, ST_SCOMM_SENDING, ST_SCOMM_INIT
+  ".m2M?",  // ST_MADAVI_OFF, ST_MADAVI_IDLE, ST_MADAVI_ERROR, ST_MADAVI_SENDING, ST_MADAVI_INIT
+  // group TTN (LoRa WAN)
+  ".t3T?",  // ST_TTN_OFF, ST_TTN_IDLE, ST_TTN_ERROR, ST_TTN_SENDING, ST_TTN_INIT
+  // group BlueTooth
+  ".B4b?",  // ST_BT_OFF, ST_BT_CONNECTED, ST_BT_ERROR, ST_BT_CONNECTING, ST_BT_INIT
+  // group other
+  ".",      // ST_NODISPLAY
+  ".",      // ST_NODISPLAY
+  ".H7",    // ST_NODISPLAY, ST_HV_OK, ST_HV_ERROR
+};
+
+void set_status(int index, int value) {
+  if ((index >= 0) && (index < STATUS_MAX))
+    status[index] = value;
+  else
+    log(ERROR, "invalid parameters: set_status(%d, %d)", index, value);
 }
 
-void DisplayGMC(int TimeSec, int RadNSvph, int CPS, bool use_display, bool connected) {
+char get_status_char(int index) {
+  if ((index >= 0) && (index < STATUS_MAX)) {
+    int idx = status[index];
+    if (idx < strlen(status_chars[index]))
+      return status_chars[index][idx];
+    else
+      log(ERROR, "string status_chars[%d] is too short, no char at index %d", index, idx);
+  } else
+    log(ERROR, "invalid parameters: get_status_char(%d)", index);
+  return '?';  // some error happened
+}
+
+void displayStatus(void) {
+  char output[17];  // max. 16 chars wide display + \0 terminator
+  const char *format = isLoraBoard ? "%c%c%c%c%c%c%c%c" : "%c %c %c %c %c %c %c %c";  // 8 or 16 chars wide
+  snprintf(output, 17, format,
+           get_status_char(0), get_status_char(1), get_status_char(2), get_status_char(3),
+           get_status_char(4), get_status_char(5), get_status_char(6), get_status_char(7)
+          );
+  displayStatusLine(output);
+}
+
+char *format_time(int secs) {
+  static char result[4];
+  int mins = secs / 60;
+  int hours = secs / (60 * 60);
+  int days = secs / (24 * 60 * 60);
+  if (secs < 60) {
+    snprintf(result, 4, "%2ds", secs);
+  } else if (mins < 60) {
+    snprintf(result, 4, "%2dm", mins);
+  } else if (hours < 24) {
+    snprintf(result, 4, "%2dh", hours);
+  } else {
+    days = days % 100;  // roll over after 100d
+    snprintf(result, 4, "%2dd", days);
+  }
+  return result;
+}
+
+void DisplayGMC(int TimeSec, int RadNSvph, int CPM, bool use_display) {
   if (!use_display) {
     if (!displayIsClear) {
       pu8x8->clear();
@@ -103,33 +158,22 @@ void DisplayGMC(int TimeSec, int RadNSvph, int CPS, bool use_display, bool conne
 
   pu8x8->clear();
 
+  char output[40];
   if (!isLoraBoard) {
-    char output[80];
-    int TimeMin = TimeSec / 60;         // calculate number of minutes
-    if (TimeMin >= 999) TimeMin = 999;  // limit minutes to max. 999
-
-    // print the upper line including time and measured radation
     pu8x8->setFont(u8x8_font_7x14_1x2_f);
-
-    if (TimeMin >= 1) {                 // >= 1 minute -> display in minutes
-      sprintf(output, "%3d", TimeMin);
-      pu8x8->print(output);
-    } else {                            // < 1 minute -> display in seconds, inverse
-      sprintf(output, "%3d", TimeSec);
-      pu8x8->inverse();
-      pu8x8->print(output);
-      pu8x8->noInverse();
-    }
-    sprintf(output, "%7d nSv/h", RadNSvph);
-    pu8x8->print(output);
+    sprintf(output, "%3s%7d nSv/h", format_time(TimeSec), RadNSvph);
+    pu8x8->drawString(0, 0, output);
     pu8x8->setFont(u8x8_font_inb33_3x6_n);
-    pu8x8->drawString(0, 2, nullFill(CPS, 5));
+    sprintf(output, "%5d", CPM);
+    pu8x8->drawString(0, 2, output);
   } else {
-    pu8x8->setFont(u8x8_font_5x8_f);
-    pu8x8->drawString(0, 2, nullFill(RadNSvph, 8));
-    pu8x8->draw2x2String(0, 3, nullFill(CPS, 4));
-    pu8x8->drawString(0, 5, "     cpm");
+    pu8x8->setFont(u8x8_font_amstrad_cpc_extended_f);
+    sprintf(output, " %7d", RadNSvph);
+    pu8x8->drawString(0, 2, output);
+    pu8x8->setFont(u8x8_font_px437wyse700b_2x2_f);
+    sprintf(output, "%4d", CPM);
+    pu8x8->drawString(0, 3, output);
   }
-  displayStatusLine(connected ? " " : "connecting...");
+  displayStatus();
   displayIsClear = false;
 };

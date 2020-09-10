@@ -1,5 +1,0 @@
-#
-# This file should be stored at /etc/udev/rules.d on installation to allow the Arduino IDE to access the ttyUSB device.
-# It makes sure that non-superuser have access to the connected HELTEC Wireless stick, so the upload of sketches etc. can be executed as non-superuser.
-#
-SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60",MODE="0666"
